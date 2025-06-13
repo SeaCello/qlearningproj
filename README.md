@@ -1,0 +1,2 @@
+# qlearningproj
+project for school
