@@ -1,2 +1,2 @@
-# qlearningproj
-project for school
+# Qlearning
+ 
