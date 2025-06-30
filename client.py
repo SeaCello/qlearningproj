@@ -4,67 +4,67 @@ import numpy as np
 # Conexão com o servidor
 s = cn.connect(2037)
 
-q_matrix = np.zeros((96, 3))  # Matriz Q inicializada com zeros
-# 96 estados (0 a 95) e 3 ações (left, right, jump)
-# A matriz Q terá dimensões (número de estados, número de ações)
-
+q_matrix = np.zeros((96, 3))  # Matriz Q inicializada contagem com zeros
 N_matrix = np.zeros((96, 3))  # Matriz de contagem de ações
 actions = ["left", "right", "jump"] # Lista de ações possíveis
 
-alpha = 0.5  # Taxa de aprendizado (0.2 é o valor do exemplo no notebook)
-gamma = 0.9  # Fator de desconto (0.5 é o valor do exemplo no notebook)
-
-epsilon = 1.0
-e_decay = 0.9995
-e_min = 0.01
+alpha = 0.3
 
 T = 10000  # Número de trajetórias a serem executadas
 
-def q_update(state, action, next_state, reward, q_matrix, alpha, gamma):
+def q_update(state, action, next_state, reward, q_matrix, alpha=0.3, gamma=0.95):
     estimate_q = reward + gamma * np.max(q_matrix[next_state, :])
     q_value = q_matrix[state, action] + alpha * (estimate_q - q_matrix[state, action])
     return q_value
 
-def choose_action(state):
-    if np.random.uniform(0, 1) < epsilon:
-        return actions[np.random.choice([0, 1, 2])]
-    else:
-        return actions[np.argmax(q_matrix[state, :])]
+def choose_action(state, q_matrix, N_matrix, c=2.0):
+    total_visits = np.sum(N_matrix[state]) + 1e-5  # evitar log(0)
+    q_values = q_matrix[state]
+    counts = N_matrix[state] + 1e-5  # evitar divisão por zero
+    log_total = np.log(max(total_visits, 1.0001))  # garantir log positivo
+    ucb_bonus = c * np.sqrt(log_total / counts)
+    ucb_scores = q_values + ucb_bonus
+    ucb_scores = np.nan_to_num(ucb_scores, nan=-np.inf)  # trata NaNs
+    return actions[np.argmax(ucb_scores)]
+
+def print_result(q_matrix, file): # função para escrever arquivos
+    with open(file, "w") as f:
+        for row in q_matrix:
+            f.write(f" ".join(map(lambda x: f"{x:.6f}", row)) + "\n")
 
 mode = input("1: Treinamento, 2: Teste\n")
 
 if(int(mode) == 1):
+    sucesso = 0
     for i in range(T):
-        print(f"Trajetoria {i}, Epsilon {epsilon}")
+        print(f"Trajetoria {i}, Sucesso {sucesso}")
         state = 0
         terminal = True
+        print_result(q_matrix, "result_previa.txt")
+        print_result(N_matrix, "action_previa.txt")
         while terminal:
-            action =  choose_action(state) # Escolhe uma ação aleatória
-
-            N_matrix[state][actions.index(action)] += 1  # Incrementa a contagem de ações
-
-            # Envia a ação e recebe o novo estado e recompensa
-            
-            next_state, reward = cn.get_state_reward(s, action)
+            action =  choose_action(state, q_matrix, N_matrix, c=3.0) # Escolhe uma ação aleatória
+            action_index = actions.index(action)
+            N_matrix[state, action_index] += 1  # Incrementa a contagem de ações
+            next_state, reward = cn.get_state_reward(s, action) # Envia a ação e recebe o novo estado e recompensa
             next_state = int(next_state[2:], 2)
 
-            q_matrix[state][actions.index(action)] = q_update(state, actions.index(action), next_state, reward, q_matrix, alpha, gamma)
+            q_matrix[state, action_index] = q_update(state, action_index, next_state, reward, q_matrix, alpha=alpha, gamma=0.95)
             
+            last_state = state
             state = next_state
 
-            if reward == 300 or reward == -100:
+            if reward == 300:
+                sucesso += 1
                 terminal = False
-        epsilon = max(e_min, epsilon * e_decay)
-    # criar arquivo de resultados
-    with open("result.txt", "w") as f:
-        for row in q_matrix:
-            f.write(f" ".join(map(lambda x: f"{x:.6f}", row)) + "\n")
-    # criar arquivo de ações
-    with open("actions.txt", "w") as f:
-        for row in N_matrix:
-            f.write(f" ".join(map(str, row)) + "\n")
+            if reward == -100:
+                terminal = False
+    # criar arquivos de resultados
+    print_result(q_matrix, "resultado.txt")
+    print_result(N_matrix, "actions.txt")
+    
 elif (int(mode) == 2):
-    q_matrix = np.loadtxt("result.txt", delimiter=" ")
+    q_matrix = np.loadtxt("resultado.txt", delimiter=" ")
     terminal = True
     state = 0
     while terminal:
@@ -73,13 +73,11 @@ elif (int(mode) == 2):
         next_state = int(next_state[2:], 2)
         print(f"Ação: {action}, Estado: {next_state}, Recompensa: {reward}")
         state = next_state
-        if reward == 300 or reward == -100:
+        if reward == 300:
+            input("Success. Press enter to leave.")
+            terminal = False
+        if reward == -100:
+            input("Failure. Press enter to leave.")
             terminal = False
 else:
     input("Unexpected input. Press enter to leave.")
-    
-
-# for i in range (T):
-#     state, reward = cn.get_state_reward(s, "jump")
-#     next_state = int(state[2:],2)
-#     print(f"Ação: {actions[0]}, Estado: {next_state}, Recompensa: {reward}")
